@@ -1,0 +1,240 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visor de Pedidos TaT</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Estilos adicionales si son necesarios */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .table-container {
+            max-height: 60vh; /* Altura máxima para la tabla antes de hacer scroll */
+            overflow-y: auto;
+        }
+        /* Estilo para el loader */
+        .loader {
+            border: 5px solid #f3f3f3; /* Light grey */
+            border-top: 5px solid #3498db; /* Blue */
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8">
+        <header class="mb-8 text-center">
+            <h1 class="text-3xl sm:text-4xl font-bold text-sky-700">Gestión de Pedidos TaT</h1>
+            <p class="text-gray-600 mt-2">Visualiza los pedidos según su estado.</p>
+        </header>
+
+        <div class="bg-white p-6 rounded-lg shadow-xl mb-8">
+            <div class="mb-6">
+                <label for="estadoSelector" class="block text-sm font-medium text-gray-700 mb-2">Selecciona un Estado de Pedido:</label>
+                <select id="estadoSelector" class="mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm">
+                    <option value="">Cargando estados...</option>
+                </select>
+            </div>
+            <button id="cargarPedidosBtn" class="w-full bg-sky-600 hover:bg-sky-700 text-white font-bold py-2 px-4 rounded-md focus:outline-none focus:shadow-outline transition duration-150 ease-in-out disabled:opacity-50" disabled>
+                Cargar Pedidos
+            </button>
+        </div>
+
+        <div id="loader" class="loader hidden"></div>
+        <div id="errorContainer" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-md relative mb-6" role="alert">
+            <strong class="font-bold">Error:</strong>
+            <span class="block sm:inline" id="errorMessage"></span>
+        </div>
+        
+        <div id="pedidosContainer" class="bg-white p-6 rounded-lg shadow-xl">
+            <h2 class="text-2xl font-semibold mb-4 text-gray-700">Resultados:</h2>
+            <div id="noResults" class="text-gray-500 hidden">No se encontraron pedidos para el estado seleccionado o no se ha seleccionado un estado.</div>
+            <div class="table-container">
+                <table id="pedidosTable" class="min-w-full divide-y divide-gray-200 hidden">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID Pedido</th>
+                            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cliente</th>
+                            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Correo</th>
+                            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fecha Pedido</th>
+                            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Dirección</th>
+                            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+                            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
+                            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Notas</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pedidosTableBody" class="bg-white divide-y divide-gray-200">
+                        <!-- Las filas de pedidos se insertarán aquí -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <footer class="mt-12 text-center text-sm text-gray-500">
+            <p>&copy; <span id="currentYear"></span> Visor de Pedidos. Creado para Pandatat.</p>
+        </footer>
+    </div>
+
+    <script>
+        const BASE_URL = 'http://localhost:5000'; // URL de tu backend Flask
+        const estadoSelector = document.getElementById('estadoSelector');
+        const cargarPedidosBtn = document.getElementById('cargarPedidosBtn');
+        const pedidosTable = document.getElementById('pedidosTable');
+        const pedidosTableBody = document.getElementById('pedidosTableBody');
+        const noResultsDiv = document.getElementById('noResults');
+        const loader = document.getElementById('loader');
+        const errorContainer = document.getElementById('errorContainer');
+        const errorMessageSpan = document.getElementById('errorMessage');
+        
+        document.getElementById('currentYear').textContent = new Date().getFullYear();
+
+        // --- Funciones para mostrar/ocultar elementos ---
+        function showLoader() {
+            loader.classList.remove('hidden');
+        }
+        function hideLoader() {
+            loader.classList.add('hidden');
+        }
+        function showError(message) {
+            errorMessageSpan.textContent = message;
+            errorContainer.classList.remove('hidden');
+            // Ocultar después de 5 segundos
+            setTimeout(() => {
+                errorContainer.classList.add('hidden');
+            }, 5000);
+        }
+        function hideError() {
+            errorContainer.classList.add('hidden');
+        }
+
+        // --- Cargar Estados de Pedido ---
+        async function cargarEstados() {
+            showLoader();
+            hideError();
+            try {
+                const response = await fetch(`${BASE_URL}/estados_pedido`);
+                if (!response.ok) {
+                    throw new Error(`Error HTTP ${response.status}: No se pudieron cargar los estados.`);
+                }
+                const estados = await response.json();
+                
+                estadoSelector.innerHTML = '<option value="">-- Selecciona un estado --</option>'; // Opción por defecto
+                
+                // Filtrar solo los estados requeridos para la visualización principal
+                const estadosRequeridos = ["Enviados", "Cancelados", "Pagados", "Reenviados"];
+                const estadosFiltrados = estados.filter(estado => estadosRequeridos.includes(estado.nombre_estado));
+
+                if (estadosFiltrados.length > 0) {
+                    estadosFiltrados.forEach(estado => {
+                        const option = document.createElement('option');
+                        option.value = estado.nombre_estado; // Usamos el nombre_estado como valor
+                        option.textContent = `${estado.nombre_estado} - ${estado.descripcion_estado || ''}`;
+                        estadoSelector.appendChild(option);
+                    });
+                    cargarPedidosBtn.disabled = false;
+                } else {
+                     estadoSelector.innerHTML = '<option value="">No hay estados configurados para mostrar</option>';
+                     showError('No se encontraron los estados ("Enviados", "Cancelados", "Pagados", "Reenviados") en el backend. Asegúrate de ejecutar /setup_estados o que existan en la BD.');
+                }
+
+            } catch (error) {
+                console.error('Error al cargar estados:', error);
+                showError(`No se pudieron cargar los estados. Verifica que el backend esté corriendo en ${BASE_URL} y la ruta /estados_pedido funcione. Detalle: ${error.message}`);
+                estadoSelector.innerHTML = '<option value="">Error al cargar estados</option>';
+            } finally {
+                hideLoader();
+            }
+        }
+
+        // --- Cargar Pedidos por Estado ---
+        async function cargarPedidos() {
+            const estadoSeleccionado = estadoSelector.value;
+            if (!estadoSeleccionado) {
+                // Ya no es necesario un alert aquí, el botón estará deshabilitado o se mostrará "noResultsDiv"
+                pedidosTableBody.innerHTML = '';
+                pedidosTable.classList.add('hidden');
+                noResultsDiv.classList.remove('hidden');
+                noResultsDiv.textContent = 'Por favor, selecciona un estado para ver los pedidos.';
+                return;
+            }
+
+            showLoader();
+            hideError();
+            pedidosTable.classList.add('hidden');
+            noResultsDiv.classList.add('hidden');
+            pedidosTableBody.innerHTML = ''; // Limpiar tabla anterior
+
+            try {
+                const response = await fetch(`${BASE_URL}/pedidos?estado=${encodeURIComponent(estadoSeleccionado)}`);
+                if (!response.ok) {
+                     const errorData = await response.json().catch(() => ({error: `Error HTTP ${response.status}`})); // Intenta parsear el error del backend
+                    throw new Error(errorData.error || `Error HTTP ${response.status}: No se pudieron cargar los pedidos.`);
+                }
+                const pedidos = await response.json();
+
+                if (pedidos.length === 0) {
+                    noResultsDiv.textContent = `No se encontraron pedidos con el estado: "${estadoSeleccionado}".`;
+                    noResultsDiv.classList.remove('hidden');
+                } else {
+                    pedidos.forEach(pedido => {
+                        const row = pedidosTableBody.insertRow();
+                        row.insertCell().textContent = pedido.id_pedido;
+                        row.insertCell().textContent = `${pedido.nombre_usuario || ''} ${pedido.apellido_usuario || ''}`.trim();
+                        row.insertCell().textContent = pedido.correo_electronico || 'N/A';
+                        row.insertCell().textContent = pedido.fecha_pedido ? new Date(pedido.fecha_pedido).toLocaleString('es-ES') : 'N/A';
+                        row.insertCell().textContent = pedido.direccion_envio || 'N/A';
+                        row.insertCell().textContent = pedido.total_pedido ? parseFloat(pedido.total_pedido).toFixed(2) : 'N/A';
+                        row.insertCell().textContent = pedido.nombre_estado || 'N/A';
+                        row.insertCell().textContent = pedido.notas_pedido || '';
+
+                        // Aplicar estilos a las celdas
+                        Array.from(row.cells).forEach(cell => {
+                            cell.className = 'px-4 py-3 whitespace-nowrap text-sm text-gray-700';
+                        });
+                    });
+                    pedidosTable.classList.remove('hidden');
+                }
+            } catch (error) {
+                console.error('Error al cargar pedidos:', error);
+                showError(`No se pudieron cargar los pedidos para el estado "${estadoSeleccionado}". Detalle: ${error.message}`);
+                noResultsDiv.textContent = `Error al cargar pedidos. Intenta de nuevo.`;
+                noResultsDiv.classList.remove('hidden');
+            } finally {
+                hideLoader();
+            }
+        }
+
+        // --- Event Listeners ---
+        cargarPedidosBtn.addEventListener('click', cargarPedidos);
+        
+        // Opcional: Cargar pedidos automáticamente cuando cambia la selección (si lo prefieres)
+        // estadoSelector.addEventListener('change', () => {
+        //     if(estadoSelector.value){ // Solo si hay un estado seleccionado
+        //         cargarPedidos();
+        //     } else { // Si se selecciona la opción por defecto "-- Selecciona un estado --"
+        //         pedidosTableBody.innerHTML = '';
+        //         pedidosTable.classList.add('hidden');
+        //         noResultsDiv.classList.remove('hidden');
+        //         noResultsDiv.textContent = 'Selecciona un estado para ver los pedidos.';
+        //     }
+        // });
+
+        // --- Inicialización ---
+        document.addEventListener('DOMContentLoaded', () => {
+            cargarEstados(); // Cargar los estados al iniciar la página
+            noResultsDiv.classList.remove('hidden'); // Mostrar mensaje inicial
+        });
+    </script>
+</body>
+</html>
